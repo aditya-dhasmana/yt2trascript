@@ -5,6 +5,8 @@
 // Express = backend server framework
 import express from "express";
 
+import path from "path";
+
 // CORS = allows frontend (different domain like Vercel) to call this backend
 import cors from "cors";
 
@@ -15,6 +17,12 @@ import { spawn } from "child_process";
 // ===============================
 // APP INITIALIZATION
 // ===============================
+
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 
 const app = express();
 
@@ -155,7 +163,12 @@ app.post("/transcript", (req, res) => {
   ];
 
   // Spawn python process
-  const py = spawn("python3", [...args, videoUrl]);
+
+    const pythonPath = path.join(__dirname, ".venv", "Scripts", "python.exe"); // Windows
+    // const pythonPath = path.join(__dirname, ".venv", "bin", "python"); // Linux/macOS
+
+    const py = spawn(pythonPath, [...args, videoUrl]);
+
 
   // Store output from yt-dlp
   let output = "";
