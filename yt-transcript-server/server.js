@@ -55,6 +55,8 @@ function parseCaptions(content) {
 
   const result = [];
 
+  const PORT = process.env.PORT || 4000;
+
   for (let line of lines) {
 
     // Remove extra spaces
@@ -222,6 +224,6 @@ app.post("/transcript", (req, res) => {
 // START SERVER
 // ===============================
 
-app.listen(4000, () => {
-  console.log("ULTRA server running on http://localhost:4000");
+app.listen(PORT, () => {
+  console.log(`ULTRA SERVER RUNNING ON ${PORT}`);
 });
