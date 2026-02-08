@@ -155,7 +155,7 @@ app.post("/transcript", (req, res) => {
   ];
 
   // Spawn python process
-  const py = spawn("python", [...args, videoUrl]);
+  const py = spawn("python3", [...args, videoUrl]);
 
   // Store output from yt-dlp
   let output = "";
