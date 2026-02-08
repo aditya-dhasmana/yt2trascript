@@ -55,7 +55,6 @@ function parseCaptions(content) {
 
   const result = [];
 
-  const PORT = process.env.PORT || 4000;
 
   for (let line of lines) {
 
@@ -223,7 +222,7 @@ app.post("/transcript", (req, res) => {
 // ===============================
 // START SERVER
 // ===============================
-
+const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`ULTRA SERVER RUNNING ON ${PORT}`);
 });
