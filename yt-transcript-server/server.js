@@ -4,7 +4,6 @@
 
 // Express = backend server framework
 import express from "express";
-
 import path from "path";
 
 // CORS = allows frontend (different domain like Vercel) to call this backend
@@ -13,16 +12,14 @@ import cors from "cors";
 // spawn = used to run external programs (here: python + yt-dlp)
 import { spawn } from "child_process";
 
+// Needed for __dirname in ES modules
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ===============================
 // APP INITIALIZATION
 // ===============================
-
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 
 const app = express();
 
@@ -33,43 +30,17 @@ app.use(cors());
 // (frontend sends { videoUrl: "..." })
 app.use(express.json());
 
-
 // ===============================
 // CAPTION PARSER FUNCTION
 // ===============================
 
-/*
-This function cleans subtitle text.
-
-yt-dlp outputs subtitles in WEBVTT format like:
-
-WEBVTT
-00:00:00.000 --> 00:00:01.000
-Hello world
-
-We REMOVE:
-- WEBVTT header
-- timestamps
-- empty lines
-- numbering
-
-And keep only actual spoken text.
-*/
-
 function parseCaptions(content) {
-
-  // Split file into lines
   const lines = content.split("\n");
-
   const result = [];
 
-
   for (let line of lines) {
-
-    // Remove extra spaces
     line = line.trim();
 
-    // Skip unwanted lines:
     if (
       !line ||                      // empty lines
       line.startsWith("WEBVTT") || // header
@@ -79,74 +50,24 @@ function parseCaptions(content) {
       continue;
     }
 
-    // Save cleaned text
     result.push({ text: line });
   }
 
   return result;
 }
 
-
 // ===============================
 // API ROUTE
 // ===============================
 
-/*
-Frontend sends POST request:
-
-POST /transcript
-Body:
-{
-  videoUrl: "https://youtube.com/..."
-}
-*/
-
 app.post("/transcript", (req, res) => {
-
-  // Extract video URL from request
   const { videoUrl } = req.body;
 
-  // Validate input
   if (!videoUrl) {
     return res.status(400).json({ error: "Video URL required" });
   }
 
   console.log("Fetching transcript:", videoUrl);
-
-
-  // ===============================
-  // yt-dlp COMMAND SETUP
-  // ===============================
-
-  /*
-  We run:
-
-  python -m yt_dlp [options]
-
-  Options explained:
-
-  -m yt_dlp
-      run yt-dlp module
-
-  --skip-download
-      don't download video, only metadata/subtitles
-
-  --write-auto-sub
-      allow auto-generated captions
-
-  --write-sub
-      allow manual captions
-
-  --sub-lang en.*
-      match English subtitles
-
-  --convert-subs vtt
-      convert subtitles to WEBVTT format
-
-  --print requested_subtitles
-      print subtitle content to stdout instead of saving files
-      (THIS is why we don't need filesystem anymore)
-  */
 
   const args = [
     "-m",
@@ -162,75 +83,49 @@ app.post("/transcript", (req, res) => {
     "requested_subtitles"
   ];
 
-  // Spawn python process
+  // ===============================
+  // SPAWN PYTHON PROCESS (CROSS-PLATFORM)
+  // ===============================
 
-    const pythonPath = path.join(__dirname, ".venv", "Scripts", "python.exe"); // Windows
-    // const pythonPath = path.join(__dirname, ".venv", "bin", "python"); // Linux/macOS
+  // On Render (Linux), use 'python3' from PATH
+  // Locally on Windows, use .venv python.exe
+  const pythonPath = process.env.RENDER
+    ? "python3"
+    : path.join(__dirname, ".venv", "Scripts", "python.exe");
 
-    const py = spawn(pythonPath, [...args, videoUrl]);
+  const py = spawn(pythonPath, [...args, videoUrl]);
 
-
-  // Store output from yt-dlp
   let output = "";
-
 
   // ===============================
   // READ yt-dlp OUTPUT (stdout)
   // ===============================
-
-  // Capture subtitle content printed by yt-dlp
   py.stdout.on("data", (data) => {
     output += data.toString();
   });
 
-
-  // Log errors from yt-dlp
   py.stderr.on("data", (data) => {
     console.log("ERR:", data.toString());
   });
 
-
-  // If python fails to start
   py.on("error", () => {
     return res.status(500).json({ error: "Python spawn failed" });
   });
 
-
-  // ===============================
-  // PROCESS AFTER yt-dlp FINISHES
-  // ===============================
-
   py.on("close", () => {
-
     try {
-
-      // If no subtitle output found
       if (!output) {
-        return res.status(404).json({
-          error: "No captions available"
-        });
+        return res.status(404).json({ error: "No captions available" });
       }
 
-      // Clean and parse captions
       const transcript = parseCaptions(output);
-
-      // Send transcript back to frontend
       res.json({ transcript });
-
     } catch (e) {
-
       console.log("Parse error:", e);
-
-      res.status(500).json({
-        error: "Processing failed"
-      });
-
+      res.status(500).json({ error: "Processing failed" });
     }
-
   });
-
 });
-
 
 // ===============================
 // START SERVER
