@@ -55,11 +55,14 @@ export default function Home() {
       });
 
       // Fetch transcript from backend
-      const res = await fetch("http://localhost:4000/transcript", {
+      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL; // add in Vercel settings
+
+      const res = await fetch(`${BACKEND_URL}/transcript`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ videoUrl }),
       });
+
 
       const data = await res.json();
 
