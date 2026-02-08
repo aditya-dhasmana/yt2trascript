@@ -1,0 +1,17 @@
+# Node modules (never upload)
+node_modules
+
+# Environment variables
+.env
+
+# transcripts temp folder (if you ever use it again)
+transcripts
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS junk
+.DS_Store
+Thumbs.db
