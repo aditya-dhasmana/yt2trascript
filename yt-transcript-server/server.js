@@ -2,52 +2,55 @@
 // IMPORTS
 // ===============================
 
-// Express = backend server framework
 import express from "express";
-
-import path from "path";
-
-// CORS = allows frontend (different domain like Vercel) to call this backend
 import cors from "cors";
-
-// spawn = used to run external programs (here: python + yt-dlp)
-import { spawn } from "child_process";
-
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ===============================
-// APP INITIALIZATION
-// ===============================
+import axios from "axios";
 
 const app = express();
 
-// Enable CORS so frontend can access API
 app.use(cors());
-
-// Allow JSON request bodies
 app.use(express.json());
 
 // ===============================
-// CAPTION PARSER FUNCTION
+// HELPER FUNCTIONS
 // ===============================
 
-function parseCaptions(content) {
-  const lines = content.split("\n");
+function extractVideoId(url) {
+
+  const match = url.match(
+    /(?:youtu\.be\/|youtube\.com\/watch\?v=)([^&]+)/);
+
+  return match ? match[1] : null;
+}
+
+function decodeHtml(html) {
+
+  const match = html.match(
+    /ytInitialPlayerResponse\s*=\s*(\{.+?\});/);
+
+  if (!match) return null;
+
+  return JSON.parse(match[1]);
+}
+
+function parseXMLCaptions(xml) {
+
+  const regex = /<text[^>]*>(.*?)<\/text>/g;
+
   const result = [];
 
-  for (let line of lines) {
-    line = line.trim();
-    if (
-      !line ||
-      line.startsWith("WEBVTT") ||
-      line.includes("-->") ||
-      /^\d+$/.test(line)
-    ) continue;
+  let match;
 
-    result.push({ text: line });
+  while ((match = regex.exec(xml)) !== null) {
+
+    const text = match[1]
+      .replace(/&amp;/g,"&")
+      .replace(/&lt;/g,"<")
+      .replace(/&gt;/g,">")
+      .replace(/&#39;/g,"'")
+      .replace(/&quot;/g,'"');
+
+    result.push({ text });
   }
 
   return result;
@@ -57,86 +60,55 @@ function parseCaptions(content) {
 // API ROUTE
 // ===============================
 
-app.post("/transcript", (req, res) => {
+app.post("/transcript", async (req,res) => {
 
-  const { videoUrl } = req.body;
+  try {
 
-  if (!videoUrl) {
-    return res.status(400).json({ error: "Video URL required" });
+    const { videoUrl } = req.body;
+
+    if(!videoUrl)
+      return res.status(400).json({ error:"Video URL required" });
+
+    console.log("Fetching transcript:", videoUrl);
+
+    const videoId = extractVideoId(videoUrl);
+
+    if(!videoId)
+      return res.status(400).json({ error:"Invalid YouTube URL" });
+
+    // fetch youtube page
+    const htmlRes = await axios.get(
+      `https://www.youtube.com/watch?v=${videoId}`);
+
+    const playerResponse = decodeHtml(htmlRes.data);
+
+    if(!playerResponse?.captions)
+      return res.status(404).json({
+        error:"No captions available"
+      });
+
+    const tracks =
+      playerResponse.captions
+      .playerCaptionsTracklistRenderer
+      .captionTracks;
+
+    const captionUrl = tracks[0].baseUrl;
+
+    // fetch caption xml
+    const xmlRes = await axios.get(captionUrl);
+
+    const transcript = parseXMLCaptions(xmlRes.data);
+
+    res.json({ transcript });
+
+  } catch(err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      error:"Processing failed"
+    });
   }
-
-  console.log("Fetching transcript:", videoUrl);
-
-  const args = [
-    "-m",
-    "yt_dlp",
-    "--skip-download",
-    "--write-auto-sub",
-    "--write-sub",
-    "--sub-lang",
-    "en.*",
-    "--convert-subs",
-    "vtt",
-    "--print",
-    "requested_subtitles"
-  ];
-
-  // ===============================
-  // PYTHON PATH (FIXED FOR RENDER)
-  // ===============================
-
-  const pythonPath = process.env.RENDER
-    ? "python3" // Render (Linux)
-    : path.join(__dirname, ".venv", "Scripts", "python.exe"); // Local Windows
-
-  const py = spawn(pythonPath, [...args, videoUrl]);
-
-  let output = "";
-  let responseSent = false;
-
-  py.stdout.on("data", (data) => {
-    output += data.toString();
-  });
-
-  py.stderr.on("data", (data) => {
-    console.log("ERR:", data.toString());
-  });
-
-  py.on("error", (err) => {
-    if (!responseSent) {
-      responseSent = true;
-      console.log("Python spawn failed:", err);
-      return res.status(500).json({ error: "Python spawn failed" });
-    }
-  });
-
-  py.on("close", () => {
-
-    if (responseSent) return;
-
-    try {
-
-      if (!output) {
-        responseSent = true;
-        return res.status(404).json({ error: "No captions available" });
-      }
-
-      const transcript = parseCaptions(output);
-
-      responseSent = true;
-      res.json({ transcript });
-
-    } catch (e) {
-
-      if (!responseSent) {
-        responseSent = true;
-        console.log("Parse error:", e);
-        res.status(500).json({ error: "Processing failed" });
-      }
-
-    }
-
-  });
 
 });
 
