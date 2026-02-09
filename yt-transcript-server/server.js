@@ -5,6 +5,11 @@
 import express from "express";
 import cors from "cors";
 import axios from "axios";
+import PQueue from "p-queue";
+
+// ===============================
+// APP INIT
+// ===============================
 
 const app = express();
 
@@ -12,104 +17,126 @@ app.use(cors());
 app.use(express.json());
 
 // ===============================
-// HELPER FUNCTIONS
+// GOD MODE REQUEST QUEUE
+// Prevent YouTube rate limiting
+// ===============================
+
+const requestQueue = new PQueue({
+  concurrency: 1,   // only 1 YouTube request at a time
+  interval: 5000,   // wait 5 sec between requests
+  intervalCap: 1
+});
+
+// ===============================
+// RANDOM HEADERS (ANTI BOT)
+// ===============================
+
+function randomHeaders() {
+  const agents = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    "Mozilla/5.0 (X11; Linux x86_64)"
+  ];
+
+  return {
+    "User-Agent": agents[Math.floor(Math.random() * agents.length)],
+    "Accept-Language": "en-US,en;q=0.9"
+  };
+}
+
+// ===============================
+// EXTRACT VIDEO ID
 // ===============================
 
 function extractVideoId(url) {
-
   const match = url.match(
-    /(?:youtu\.be\/|youtube\.com\/watch\?v=)([^&]+)/);
-
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&]+)/i
+  );
   return match ? match[1] : null;
 }
 
-function decodeHtml(html) {
+// ===============================
+// PARSE XML CAPTIONS
+// ===============================
 
-  const match = html.match(
-    /ytInitialPlayerResponse\s*=\s*(\{.+?\});/);
+function parseCaptions(xml) {
+  const matches = [...xml.matchAll(/<text[^>]*>(.*?)<\/text>/g)];
 
-  if (!match) return null;
-
-  return JSON.parse(match[1]);
-}
-
-function parseXMLCaptions(xml) {
-
-  const regex = /<text[^>]*>(.*?)<\/text>/g;
-
-  const result = [];
-
-  let match;
-
-  while ((match = regex.exec(xml)) !== null) {
-
-    const text = match[1]
-      .replace(/&amp;/g,"&")
-      .replace(/&lt;/g,"<")
-      .replace(/&gt;/g,">")
-      .replace(/&#39;/g,"'")
-      .replace(/&quot;/g,'"');
-
-    result.push({ text });
-  }
-
-  return result;
+  return matches.map(m => ({
+    text: decodeURIComponent(
+      m[1]
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#10;/g, " ")
+    )
+  }));
 }
 
 // ===============================
 // API ROUTE
 // ===============================
 
-app.post("/transcript", async (req,res) => {
+app.post("/transcript", async (req, res) => {
+
+  const { videoUrl } = req.body;
+
+  if (!videoUrl) {
+    return res.status(400).json({ error: "Video URL required" });
+  }
+
+  const videoId = extractVideoId(videoUrl);
+
+  if (!videoId) {
+    return res.status(400).json({ error: "Invalid YouTube URL" });
+  }
 
   try {
 
-    const { videoUrl } = req.body;
+    const result = await requestQueue.add(async () => {
 
-    if(!videoUrl)
-      return res.status(400).json({ error:"Video URL required" });
+      // direct caption endpoint
+      const apiUrl =
+        `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&fmt=srv3`;
 
-    console.log("Fetching transcript:", videoUrl);
-
-    const videoId = extractVideoId(videoUrl);
-
-    if(!videoId)
-      return res.status(400).json({ error:"Invalid YouTube URL" });
-
-    // fetch youtube page
-    const htmlRes = await axios.get(
-      `https://www.youtube.com/watch?v=${videoId}`);
-
-    const playerResponse = decodeHtml(htmlRes.data);
-
-    if(!playerResponse?.captions)
-      return res.status(404).json({
-        error:"No captions available"
+      const response = await axios.get(apiUrl, {
+        headers: randomHeaders(),
+        timeout: 10000
       });
 
-    const tracks =
-      playerResponse.captions
-      .playerCaptionsTracklistRenderer
-      .captionTracks;
+      if (!response.data) {
+        return null;
+      }
 
-    const captionUrl = tracks[0].baseUrl;
-
-    // fetch caption xml
-    const xmlRes = await axios.get(captionUrl);
-
-    const transcript = parseXMLCaptions(xmlRes.data);
-
-    res.json({ transcript });
-
-  } catch(err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      error:"Processing failed"
+      return parseCaptions(response.data);
     });
-  }
 
+    if (!result || result.length === 0) {
+      return res.status(404).json({ error: "No captions available" });
+    }
+
+    res.json({ transcript: result });
+
+  } catch (err) {
+
+    console.log("ERROR:", err.message);
+
+    if (err.response?.status === 429) {
+      return res.status(429).json({
+        error: "Rate limited by YouTube. Try again shortly."
+      });
+    }
+
+    res.status(500).json({ error: "Transcript fetch failed" });
+  }
+});
+
+// ===============================
+// HEALTH CHECK ROUTE
+// ===============================
+
+app.get("/", (req, res) => {
+  res.send("ULTRA TRANSCRIPT API RUNNING");
 });
 
 // ===============================
@@ -119,5 +146,5 @@ app.post("/transcript", async (req,res) => {
 const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {
-  console.log(`ULTRA SERVER RUNNING ON ${PORT}`);
+  console.log(`SERVER RUNNING ON ${PORT}`);
 });
