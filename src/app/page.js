@@ -31,57 +31,71 @@ export default function Home() {
   }
 
   // ================== FETCH TRANSCRIPT ==================
-  async function handleGetTranscript() {
-    setStatus("loading");
-    setError("");
-    setTranscript("");
-    setVideoMeta(null);
+// ================== FETCH TRANSCRIPT ==================
+async function handleGetTranscript() {
+  setStatus("loading");
+  setError("");
+  setTranscript("");
+  setVideoMeta(null);
 
-    try {
-      // Fetch video meta (title + thumbnail)
-      const oEmbedRes = await fetch(
-        `https://www.youtube.com/oembed?url=${encodeURIComponent(
-          videoUrl
-        )}&format=json`
-      );
+  try {
+    // Fetch video meta (title + thumbnail)
+    const oEmbedRes = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(
+        videoUrl
+      )}&format=json`
+    );
 
-      if (!oEmbedRes.ok) throw new Error("Invalid YouTube URL");
+    if (!oEmbedRes.ok) throw new Error("Invalid YouTube URL");
 
-      const meta = await oEmbedRes.json();
+    const meta = await oEmbedRes.json();
 
-      setVideoMeta({
-        title: meta.title,
-        thumbnail: meta.thumbnail_url,
-      });
+    setVideoMeta({
+      title: meta.title,
+      thumbnail: meta.thumbnail_url,
+    });
 
-      // Fetch transcript from backend
-      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL; // add in Vercel settings
+    // 🔥 BACKEND URL (Render server)
+    const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
 
-      const res = await fetch(`${BACKEND_URL}/transcript`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoUrl }),
-      });
-
-
-      const data = await res.json();
-
-      if (res.status === 404) {
-        setStatus("no-transcript");
-        return;
-      }
-
-      if (!res.ok) throw new Error(data.error || "Failed to fetch transcript");
-
-      // Clean transcript text
-      const text = data.transcript.map((t) => t.text.trim()).join(" ");
-      setTranscript(text);
-      setStatus("success");
-    } catch (err) {
-      setError(err.message || "Something went wrong");
-      setStatus("error");
+    if (!BACKEND_URL) {
+      throw new Error("Backend URL not set in environment variables");
     }
+
+    // Call backend
+    const res = await fetch(`${BACKEND_URL}/transcript`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ videoUrl }),
+    });
+
+    const data = await res.json();
+
+    // 🔥 Handle no captions properly
+    if (!data.transcript || data.transcript.length === 0) {
+      setStatus("no-transcript");
+      return;
+    }
+
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to fetch transcript");
+    }
+
+    // Clean transcript text
+    const text = data.transcript
+      .map((t) => t.text?.trim() || "")
+      .join(" ");
+
+    setTranscript(text);
+    setStatus("success");
+  } catch (err) {
+    console.error(err);
+    setError(err.message || "Something went wrong");
+    setStatus("error");
   }
+}
 
   // ================== DOWNLOAD TXT ==================
   function downloadTxt() {
