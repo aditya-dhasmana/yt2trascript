@@ -7,18 +7,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 10000;
 
 function extractVideoId(url) {
-  const regExp =
-    /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-  const match = url.match(regExp);
-  return match && match[2].length === 11 ? match[2] : null;
+  const reg =
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([^&]+)/;
+  const match = url.match(reg);
+  return match ? match[1] : null;
 }
 
 app.post("/transcript", async (req, res) => {
   try {
     const { videoUrl } = req.body;
+
+    if (!videoUrl) {
+      return res.status(400).json({ error: "Missing videoUrl" });
+    }
 
     const videoId = extractVideoId(videoUrl);
 
@@ -26,50 +30,68 @@ app.post("/transcript", async (req, res) => {
       return res.status(400).json({ error: "Invalid YouTube URL" });
     }
 
-    // STEP 1 — get captions list
-    const infoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
-    const videoPage = await axios.get(infoUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    // STEP 1: Get player response (NO scraping HTML)
+    const player = await axios.post(
+      "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+      {
+        videoId,
+        context: {
+          client: {
+            clientName: "WEB",
+            clientVersion: "2.20210721.00.00",
+          },
+        },
       },
-    });
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+        },
+      }
+    );
 
-    const captionsRegex =
-      /"captionTracks":(\[.*?\])/;
+    const tracks =
+      player.data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
-    const match = videoPage.data.match(captionsRegex);
-
-    if (!match) {
-      return res.json({ transcript: [] });
+    if (!tracks || tracks.length === 0) {
+      return res.status(404).json({ transcript: [] });
     }
 
-    const captionTracks = JSON.parse(match[1]);
+    // STEP 2: choose English or first track
+    const track =
+      tracks.find((t) => t.languageCode === "en") || tracks[0];
 
-    const captionUrl = captionTracks[0].baseUrl;
+    // STEP 3: fetch captions XML
+    const captionRes = await axios.get(track.baseUrl);
 
-    // STEP 2 — fetch actual captions XML
-    const captions = await axios.get(captionUrl);
+    const xml = captionRes.data;
 
-    const xml = captions.data;
+    // STEP 4: parse captions
+    const matches = [...xml.matchAll(/<text[^>]*>(.*?)<\/text>/g)];
 
-    // STEP 3 — parse XML manually (simple)
-    const transcript = [...xml.matchAll(/<text.*?>(.*?)<\/text>/g)]
-      .map((m) =>
+    const transcript = matches.map((m) => ({
+      text: decodeURIComponent(
         m[1]
           .replace(/&amp;/g, "&")
           .replace(/&#39;/g, "'")
           .replace(/&quot;/g, '"')
           .replace(/&lt;/g, "<")
           .replace(/&gt;/g, ">")
-      );
+      ),
+    }));
 
     res.json({ transcript });
-
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ error: "Failed to fetch transcript" });
+
+    if (err.response?.status === 429) {
+      return res
+        .status(429)
+        .json({ error: "YouTube temporary rate limit. Try again." });
+    }
+
+    res.status(500).json({ error: "Server error fetching transcript" });
   }
 });
 
