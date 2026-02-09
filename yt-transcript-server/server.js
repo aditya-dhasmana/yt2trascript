@@ -28,30 +28,11 @@ const app = express();
 app.use(cors());
 
 // Allow JSON request bodies
-// (frontend sends { videoUrl: "..." })
 app.use(express.json());
 
 // ===============================
 // CAPTION PARSER FUNCTION
 // ===============================
-
-/*
-This function cleans subtitle text.
-
-yt-dlp outputs subtitles in WEBVTT format like:
-
-WEBVTT
-00:00:00.000 --> 00:00:01.000
-Hello world
-
-We REMOVE:
-- WEBVTT header
-- timestamps
-- empty lines
-- numbering
-
-And keep only actual spoken text.
-*/
 
 function parseCaptions(content) {
   const lines = content.split("\n");
@@ -60,10 +41,10 @@ function parseCaptions(content) {
   for (let line of lines) {
     line = line.trim();
     if (
-      !line ||                     // empty lines
-      line.startsWith("WEBVTT") || // header
-      line.includes("-->") ||      // timestamp lines
-      /^\d+$/.test(line)           // subtitle numbering
+      !line ||
+      line.startsWith("WEBVTT") ||
+      line.includes("-->") ||
+      /^\d+$/.test(line)
     ) continue;
 
     result.push({ text: line });
@@ -76,17 +57,8 @@ function parseCaptions(content) {
 // API ROUTE
 // ===============================
 
-/*
-Frontend sends POST request:
-
-POST /transcript
-Body:
-{
-  videoUrl: "https://youtube.com/..."
-}
-*/
-
 app.post("/transcript", (req, res) => {
+
   const { videoUrl } = req.body;
 
   if (!videoUrl) {
@@ -109,13 +81,18 @@ app.post("/transcript", (req, res) => {
     "requested_subtitles"
   ];
 
-  const pythonPath = path.join(__dirname, ".venv", "Scripts", "python.exe"); // Windows
-  // const pythonPath = path.join(__dirname, ".venv", "bin", "python"); // Linux/macOS
+  // ===============================
+  // PYTHON PATH (FIXED FOR RENDER)
+  // ===============================
+
+  const pythonPath = process.env.RENDER
+    ? "python3" // Render (Linux)
+    : path.join(__dirname, ".venv", "Scripts", "python.exe"); // Local Windows
 
   const py = spawn(pythonPath, [...args, videoUrl]);
 
   let output = "";
-  let responseSent = false; // <-- flag to prevent multiple responses
+  let responseSent = false;
 
   py.stdout.on("data", (data) => {
     output += data.toString();
@@ -134,32 +111,41 @@ app.post("/transcript", (req, res) => {
   });
 
   py.on("close", () => {
-    if (responseSent) return; // Already handled
+
+    if (responseSent) return;
 
     try {
+
       if (!output) {
         responseSent = true;
         return res.status(404).json({ error: "No captions available" });
       }
 
       const transcript = parseCaptions(output);
+
       responseSent = true;
       res.json({ transcript });
 
     } catch (e) {
+
       if (!responseSent) {
         responseSent = true;
         console.log("Parse error:", e);
         res.status(500).json({ error: "Processing failed" });
       }
+
     }
+
   });
+
 });
 
 // ===============================
 // START SERVER
 // ===============================
+
 const PORT = process.env.PORT || 4000;
+
 app.listen(PORT, () => {
   console.log(`ULTRA SERVER RUNNING ON ${PORT}`);
 });
