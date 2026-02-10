@@ -4,24 +4,28 @@ import { useState, useRef, useEffect } from "react";
 import jsPDF from "jspdf";
 
 export default function Home() {
+
   // ================== STATE ==================
+  // videoUrl -> user input
+  // transcript -> final parsed transcript text
+  // videoMeta -> title + thumbnail
+  // status -> UI state machine
   const [videoUrl, setVideoUrl] = useState("");
   const [transcript, setTranscript] = useState("");
   const [videoMeta, setVideoMeta] = useState(null);
-  const [status, setStatus] = useState("idle"); // idle | loading | success | no-transcript | error
+  const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
 
-  // ================== INPUT REF FOR AUTO FOCUS ==================
+  // ================== INPUT AUTO FOCUS ==================
   const inputRef = useRef(null);
 
-  // Auto focus when status becomes idle
   useEffect(() => {
     if (status === "idle" && inputRef.current) {
       inputRef.current.focus();
     }
   }, [status]);
 
-  // ================== RESET EVERYTHING ==================
+  // ================== RESET FUNCTION ==================
   function resetAll() {
     setVideoUrl("");
     setTranscript("");
@@ -30,16 +34,25 @@ export default function Home() {
     setStatus("idle");
   }
 
-  // ================== FETCH TRANSCRIPT ==================
-// ================== FETCH TRANSCRIPT ==================
+  // ================== HELPER: EXTRACT VIDEO ID ==================
+  function extractVideoId(url) {
+    const reg =
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([^&]+)/;
+    const match = url.match(reg);
+    return match ? match[1] : null;
+  }
+
+// ================== ULTRA TRANSCRIPT FLOW ==================
 async function handleGetTranscript() {
+
   setStatus("loading");
   setError("");
   setTranscript("");
   setVideoMeta(null);
 
   try {
-    // Fetch video meta (title + thumbnail)
+
+    // ================== STEP 1: FETCH VIDEO META ==================
     const oEmbedRes = await fetch(
       `https://www.youtube.com/oembed?url=${encodeURIComponent(
         videoUrl
@@ -55,47 +68,87 @@ async function handleGetTranscript() {
       thumbnail: meta.thumbnail_url,
     });
 
-    // 🔥 BACKEND URL (Render server)
-    const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
+    // ================== STEP 2: EXTRACT VIDEO ID ==================
+    const videoId = extractVideoId(videoUrl);
 
-    if (!BACKEND_URL) {
-      throw new Error("Backend URL not set in environment variables");
+    if (!videoId) throw new Error("Invalid video ID");
+
+    // ================== STEP 3: FETCH EMBED PAGE ==================
+    // Less protected than watch page
+    const embedRes = await fetch(
+      `https://www.youtube.com/embed/${videoId}`
+    );
+
+    const html = await embedRes.text();
+
+    // ================== STEP 4: EXTRACT PLAYER RESPONSE JSON ==================
+    const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});/s);
+
+    if (!match) {
+      setStatus("no-transcript");
+      return;
     }
 
-    // Call backend
+    const playerResponse = JSON.parse(match[1]);
+
+    const tracks =
+      playerResponse?.captions
+        ?.playerCaptionsTracklistRenderer
+        ?.captionTracks;
+
+    if (!tracks || tracks.length === 0) {
+      setStatus("no-transcript");
+      return;
+    }
+
+    // Prefer English, else first track
+    const track =
+      tracks.find(t => t.languageCode === "en") || tracks[0];
+
+    // ================== STEP 5: FETCH REAL CAPTION XML ==================
+    const captionRes = await fetch(track.baseUrl);
+
+    const transcriptXML = await captionRes.text();
+
+    // ================== STEP 6: SEND TO BACKEND FOR PARSING ==================
+    const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
+
     const res = await fetch(`${BACKEND_URL}/transcript`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ videoUrl }),
+      body: JSON.stringify({
+        videoUrl,
+        transcriptXML,
+      }),
     });
 
     const data = await res.json();
 
-    // 🔥 Handle no captions properly
+    if (!res.ok) {
+      throw new Error(data.error || "Backend error");
+    }
+
     if (!data.transcript || data.transcript.length === 0) {
       setStatus("no-transcript");
       return;
     }
 
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to fetch transcript");
-    }
-
-    // Clean transcript text
     const text = data.transcript
-      .map((t) => t.text?.trim() || "")
+      .map(t => t.text?.trim() || "")
       .join(" ");
 
     setTranscript(text);
     setStatus("success");
+
   } catch (err) {
     console.error(err);
     setError(err.message || "Something went wrong");
     setStatus("error");
   }
 }
+
 
   // ================== DOWNLOAD TXT ==================
   function downloadTxt() {
@@ -111,11 +164,13 @@ async function handleGetTranscript() {
   // ================== DOWNLOAD PDF ==================
   function downloadPdf() {
     const doc = new jsPDF();
+
     const pageHeight = doc.internal.pageSize.height;
     const margin = 10;
     const maxWidth = 190;
 
     const lines = doc.splitTextToSize(transcript, maxWidth);
+
     let y = margin;
 
     lines.forEach((line) => {
