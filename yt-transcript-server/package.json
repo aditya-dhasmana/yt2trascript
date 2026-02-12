@@ -7,8 +7,11 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "axios": "^1.13.5",
+    "bottleneck": "^2.19.5",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.4",
     "express": "^5.2.1",
     "p-queue": "^9.1.0"
   }

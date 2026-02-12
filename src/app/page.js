@@ -1,353 +1,128 @@
 "use client";
-
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import jsPDF from "jspdf";
 
 export default function Home() {
-
-  // ================== STATE ==================
-  // videoUrl -> user input
-  // transcript -> final parsed transcript text
-  // videoMeta -> title + thumbnail
-  // status -> UI state machine
   const [videoUrl, setVideoUrl] = useState("");
   const [transcript, setTranscript] = useState("");
   const [videoMeta, setVideoMeta] = useState(null);
-  const [status, setStatus] = useState("idle");
-  const [error, setError] = useState("");
+  const [status, setStatus] = useState("idle"); // idle, loading, success, error
+  const [loadingStep, setLoadingStep] = useState("");
 
-  // ================== INPUT AUTO FOCUS ==================
-  const inputRef = useRef(null);
+  const handleGetTranscript = async () => {
+    setStatus("loading");
+    setLoadingStep("Fetching video details...");
+    
+    try {
+      const videoId = videoUrl.match(/(?:v=|\/)([0-9A-Za-z_-]{11})/)?.[1];
+      if (!videoId) throw new Error("Invalid YouTube Link");
 
-  useEffect(() => {
-    if (status === "idle" && inputRef.current) {
-      inputRef.current.focus();
+      // Step 1: Meta
+      const oEmbedRes = await fetch(`https://www.youtube.com/oembed?url=${videoUrl}&format=json`);
+      const meta = await oEmbedRes.json();
+      setVideoMeta({ title: meta.title, thumbnail: meta.thumbnail_url });
+
+      // Step 2: Attempt Frontend Extraction (Fastest)
+      setLoadingStep("Checking for captions...");
+      let transcriptXML = null;
+      try {
+        const embedRes = await fetch(`https://www.youtube.com/embed/${videoId}`);
+        const html = await embedRes.text();
+        const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});/s);
+        if (match) {
+          const playerResponse = JSON.parse(match[1]);
+          const track = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks?.[0];
+          if (track) {
+            const capRes = await fetch(track.baseUrl);
+            transcriptXML = await capRes.text();
+          }
+        }
+      } catch (e) { console.log("Frontend fetch blocked by CORS, switching to Server AI..."); }
+
+      // Step 3: Server Call (AI Fallback)
+      setLoadingStep(transcriptXML ? "Finalizing text..." : "AI is generating transcript...");
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/transcript`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoUrl, transcriptXML }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      const text = data.transcript.map(t => t.text).join(" ");
+      setTranscript(text);
+      setStatus("success");
+    } catch (err) {
+      setStatus("error");
     }
-  }, [status]);
+  };
 
-  // ================== RESET FUNCTION ==================
-  function resetAll() {
-    setVideoUrl("");
-    setTranscript("");
-    setVideoMeta(null);
-    setError("");
-    setStatus("idle");
-  }
-
-  // ================== HELPER: EXTRACT VIDEO ID ==================
-  function extractVideoId(url) {
-    const reg =
-      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([^&]+)/;
-    const match = url.match(reg);
-    return match ? match[1] : null;
-  }
-
-// ================== ULTRA TRANSCRIPT FLOW ==================
-async function handleGetTranscript() {
-
-  setStatus("loading");
-  setError("");
-  setTranscript("");
-  setVideoMeta(null);
-
-  try {
-
-    // ================== STEP 1: FETCH VIDEO META ==================
-    const oEmbedRes = await fetch(
-      `https://www.youtube.com/oembed?url=${encodeURIComponent(
-        videoUrl
-      )}&format=json`
-    );
-
-    if (!oEmbedRes.ok) throw new Error("Invalid YouTube URL");
-
-    const meta = await oEmbedRes.json();
-
-    setVideoMeta({
-      title: meta.title,
-      thumbnail: meta.thumbnail_url,
-    });
-
-    // ================== STEP 2: EXTRACT VIDEO ID ==================
-    const videoId = extractVideoId(videoUrl);
-
-    if (!videoId) throw new Error("Invalid video ID");
-
-    // ================== STEP 3: FETCH EMBED PAGE ==================
-    // Less protected than watch page
-    const embedRes = await fetch(
-      `https://www.youtube.com/embed/${videoId}`
-    );
-
-    const html = await embedRes.text();
-
-    // ================== STEP 4: EXTRACT PLAYER RESPONSE JSON ==================
-    const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});/s);
-
-    if (!match) {
-      setStatus("no-transcript");
-      return;
-    }
-
-    const playerResponse = JSON.parse(match[1]);
-
-    const tracks =
-      playerResponse?.captions
-        ?.playerCaptionsTracklistRenderer
-        ?.captionTracks;
-
-    if (!tracks || tracks.length === 0) {
-      setStatus("no-transcript");
-      return;
-    }
-
-    // Prefer English, else first track
-    const track =
-      tracks.find(t => t.languageCode === "en") || tracks[0];
-
-    // ================== STEP 5: FETCH REAL CAPTION XML ==================
-    const captionRes = await fetch(track.baseUrl);
-
-    const transcriptXML = await captionRes.text();
-
-    // ================== STEP 6: SEND TO BACKEND FOR PARSING ==================
-    const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
-
-    const res = await fetch(`${BACKEND_URL}/transcript`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        videoUrl,
-        transcriptXML,
-      }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || "Backend error");
-    }
-
-    if (!data.transcript || data.transcript.length === 0) {
-      setStatus("no-transcript");
-      return;
-    }
-
-    const text = data.transcript
-      .map(t => t.text?.trim() || "")
-      .join(" ");
-
-    setTranscript(text);
-    setStatus("success");
-
-  } catch (err) {
-    console.error(err);
-    setError(err.message || "Something went wrong");
-    setStatus("error");
-  }
-}
-
-
-  // ================== DOWNLOAD TXT ==================
-  function downloadTxt() {
-    const blob = new Blob([transcript], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "transcript.txt";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  // ================== DOWNLOAD PDF ==================
-  function downloadPdf() {
-    const doc = new jsPDF();
-
-    const pageHeight = doc.internal.pageSize.height;
-    const margin = 10;
-    const maxWidth = 190;
-
-    const lines = doc.splitTextToSize(transcript, maxWidth);
-
-    let y = margin;
-
-    lines.forEach((line) => {
-      if (y > pageHeight - margin) {
-        doc.addPage();
-        y = margin;
-      }
-      doc.text(line, margin, y);
-      y += 8;
-    });
-
-    doc.save("transcript.pdf");
-  }
-
-  // ================== UI ==================
   return (
-    <main className="min-h-screen bg-zinc-50 flex justify-center">
-      <div
-        className={`w-full max-w-3xl px-4 sm:px-6 ${
-          status === "idle"
-            ? "flex flex-col justify-center min-h-screen"
-            : "py-16"
-        }`}
-      >
-        {/* HEADER */}
-        <div className="text-center mb-10">
-          <h1 className="text-3xl sm:text-4xl font-bold text-zinc-900">
-            Free YouTube Transcript Downloader
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 to-zinc-200 p-4 sm:p-8">
+      <div className="max-w-4xl mx-auto">
+        {/* Glass Header */}
+        <div className="text-center py-12 animate-in fade-in slide-in-from-top-4 duration-1000">
+          <h1 className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-zinc-900 to-zinc-500 mb-4">
+            Transcript Pro
           </h1>
-          <p className="text-zinc-600 mt-2 text-sm sm:text-base">
-            No login. No ads. Paste a YouTube link and download transcript as TXT
-            or PDF.
-          </p>
+          <p className="text-zinc-500 text-lg">AI-Powered YouTube Extraction • Free Forever</p>
         </div>
 
-        {/* INPUT + BUTTON */}
-        <div className="mb-10">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Paste YouTube video link..."
-                value={videoUrl}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                className="w-full h-14 px-4 pr-10 border-2 border-zinc-300 rounded-xl
-                           text-zinc-900 placeholder-zinc-400
-                           focus:outline-none focus:ring-2 focus:ring-black bg-white"
-              />
-
-              {videoUrl && (
-                <button
-                  onClick={() => setVideoUrl("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-black"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            <button
-              onClick={() => {
-                if (
-                  status === "success" ||
-                  status === "no-transcript" ||
-                  status === "error"
-                ) {
-                  resetAll();
-                } else {
-                  handleGetTranscript();
-                }
-              }}
-              disabled={status === "loading"}
-              className="h-14 px-8 rounded-xl bg-zinc-900 text-white font-medium
-                         hover:bg-zinc-800 transition-all disabled:opacity-50"
-            >
-              {status === "loading"
-                ? "Fetching..."
-                : status === "success" ||
-                  status === "no-transcript" ||
-                  status === "error"
-                ? "Next Transcript"
-                : "Get Transcript"}
-            </button>
-          </div>
+        {/* Input Section */}
+        <div className="bg-white/80 backdrop-blur-md p-2 rounded-2xl shadow-xl border border-white flex flex-col sm:flex-row gap-2 mb-8">
+          <input
+            className="flex-1 bg-transparent px-6 py-4 outline-none text-lg text-zinc-800"
+            placeholder="Paste YouTube Link (Watch, Shorts, or Live)..."
+            value={videoUrl}
+            onChange={(e) => setVideoUrl(e.target.value)}
+          />
+          <button
+            onClick={handleGetTranscript}
+            disabled={status === "loading"}
+            className="bg-zinc-900 text-white px-8 py-4 rounded-xl font-bold hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+          >
+            {status === "loading" ? "Processing..." : "Extract Now"}
+          </button>
         </div>
 
-        {/* ERROR */}
-        {status === "error" && (
-          <div className="bg-red-100 text-red-700 p-6 rounded-xl text-center mb-8">
-            <p className="font-semibold text-xl mb-2">
-              Transcript could not be fetched
-            </p>
-            <p>{error}</p>
+        {/* Loading State */}
+        {status === "loading" && (
+          <div className="text-center py-12">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-4 border-zinc-900 mb-4"></div>
+            <p className="text-zinc-600 font-medium animate-pulse">{loadingStep}</p>
           </div>
         )}
 
-        {/* NO TRANSCRIPT */}
-        {status === "no-transcript" && (
-          <div className="bg-yellow-100 text-yellow-900 p-6 rounded-xl text-center mb-8 text-lg font-medium">
-            This video does not have captions available.
-          </div>
-        )}
-
-        {/* VIDEO META */}
-        {videoMeta && (
-          <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-8">
-            <img
-              src={videoMeta.thumbnail}
-              alt="Video thumbnail"
-              className="rounded-lg mb-4 w-full"
-            />
-            <h2 className="font-semibold text-lg text-zinc-900">
-              {videoMeta.title}
-            </h2>
-          </div>
-        )}
-
-        {/* TRANSCRIPT */}
+        {/* Results Card */}
         {status === "success" && (
-          <div className="bg-white rounded-xl shadow-md p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row gap-3 mb-6">
-              <button
-                onClick={downloadTxt}
-                className="w-full border rounded-lg py-3 hover:bg-zinc-100"
-              >
-                Download TXT
-              </button>
-
-              <button
-                onClick={downloadPdf}
-                className="w-full border rounded-lg py-3 hover:bg-zinc-100"
-              >
-                Download PDF
-              </button>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in zoom-in-95 duration-500">
+            <div className="md:col-span-1">
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 sticky top-8">
+                <img src={videoMeta?.thumbnail} className="rounded-xl mb-4 w-full aspect-video object-cover" />
+                <h2 className="font-bold text-zinc-800 leading-tight mb-4">{videoMeta?.title}</h2>
+                <div className="space-y-2">
+                  <button onClick={() => window.print()} className="w-full py-2 bg-zinc-100 rounded-lg text-sm font-bold hover:bg-zinc-200 transition">Print Page</button>
+                  <button onClick={() => setStatus("idle")} className="w-full py-2 text-zinc-400 text-sm hover:text-zinc-900 transition">Clear</button>
+                </div>
+              </div>
             </div>
-
-            <div className="bg-zinc-100 rounded-lg p-4 h-64 overflow-y-auto text-sm leading-6 text-zinc-900">
-              <p className="whitespace-pre-wrap">{transcript}</p>
+            
+            <div className="md:col-span-2">
+              <div className="bg-white rounded-2xl shadow-lg border border-zinc-100 overflow-hidden">
+                <div className="p-4 bg-zinc-50 border-b flex justify-between items-center">
+                  <span className="text-xs font-bold uppercase tracking-widest text-zinc-400">Transcript Text</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => navigator.clipboard.writeText(transcript)} className="text-xs px-3 py-1 bg-white border rounded-md hover:shadow-sm">Copy</button>
+                  </div>
+                </div>
+                <div className="p-8 max-h-[600px] overflow-y-auto leading-relaxed text-zinc-700 whitespace-pre-wrap">
+                  {transcript}
+                </div>
+              </div>
             </div>
           </div>
         )}
-
-    {/* ================== SEO CONTENT FOR GOOGLE ================== */}
-    <section className="mt-20 text-zinc-700 text-sm leading-7">
-      <h2 className="text-xl font-semibold mb-4">
-        Free YouTube Transcript Downloader (No Login, No Ads)
-      </h2>
-
-      <p className="mb-4">
-        This free YouTube transcript downloader allows you to extract captions and
-        subtitles from any YouTube video instantly. No sign-in, no ads, and no
-        restrictions. Just paste the video link and download the transcript as
-        clean text or PDF.
-      </p>
-
-      <p className="mb-4">
-        You can convert YouTube captions into readable notes for study, research,
-        content creation, or reference. The tool works with videos that have
-        captions enabled and provides a fast way to turn spoken content into text.
-      </p>
-
-      <h3 className="text-lg font-semibold mt-6 mb-2">
-        Why use this YouTube Transcript Tool?
-      </h3>
-
-      <ul className="list-disc ml-6 space-y-2">
-        <li>Download YouTube captions as text</li>
-        <li>Convert YouTube transcript to PDF</li>
-        <li>No login required</li>
-        <li>No ads or distractions</li>
-        <li>Completely free to use</li>
-        <li>Clean and readable transcript format</li>
-      </ul>
-    </section>
-
-
       </div>
     </main>
   );
