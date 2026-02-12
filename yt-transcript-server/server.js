@@ -8,7 +8,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- 1. CONFIG & KEY POOL ---
+// 1. Setup API Key Pool
 const API_KEYS = [
   process.env.GEMINI_KEY_1,
   process.env.GEMINI_KEY_2,
@@ -17,76 +17,61 @@ const API_KEYS = [
 
 let keyIndex = 0;
 
-// --- 2. THE QUEUE (Bottleneck) ---
+// 2. Rate Limiter (15-30 RPM safe zone)
 const limiter = new Bottleneck({
-  minTime: 2000, // 1 request every 2 seconds (safe for 15-30 RPM)
+  minTime: 2500, 
   maxConcurrent: 1
 });
 
-// --- 3. HELPER FUNCTIONS ---
-function extractVideoId(url) {
-  const reg = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([^&]+)/;
-  const match = url.match(reg);
-  return match ? match[1] : null;
-}
-
-function parseXMLCaptions(xml) {
-  if (!xml) return [];
-  const matches = [...xml.matchAll(/<text[^>]*>(.*?)<\/text>/g)];
-  return matches.map((m) => ({
-    text: m[1]
-      .replace(/&amp;/g, "&").replace(/&#39;/g, "'")
-      .replace(/&quot;/g, '"').replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-  }));
-}
-
-// --- 4. THE AI FALLBACK ENGINE ---
-async function fetchFromGemini(videoId, modelName) {
+// 3. AI Extraction + Translation Logic
+async function fetchFromGemini(videoId, modelName, targetLang = "English") {
   const currentKey = API_KEYS[keyIndex % API_KEYS.length];
   keyIndex++;
 
   const genAI = new GoogleGenerativeAI(currentKey);
   const model = genAI.getGenerativeModel({ model: modelName });
   
-  const prompt = `Provide the transcript for this YouTube video: https://www.youtube.com/watch?v=${videoId}. Return ONLY the text.`;
+  const prompt = `
+    1. Extract the full transcript for this video: https://www.youtube.com/watch?v=${videoId}.
+    2. Translate the entire transcript into ${targetLang}.
+    3. Return ONLY the final text in ${targetLang}. No intros, no outros.
+  `;
+
   const result = await model.generateContent(prompt);
   return result.response.text();
 }
 
-// --- 5. THE MASTER ROUTE ---
+// 4. Main Route
 app.post("/transcript", async (req, res) => {
-  const { videoUrl, transcriptXML } = req.body;
-  const videoId = extractVideoId(videoUrl);
+  const { videoUrl, transcriptXML, targetLang } = req.body;
+  const videoId = videoUrl.match(/(?:v=|\/)([0-9A-Za-z_-]{11})/)?.[1];
 
-  if (!videoId) return res.status(400).json({ error: "Invalid URL" });
+  if (!videoId) return res.status(400).json({ error: "Invalid ID" });
 
   try {
-    // LAYER 1: Use XML if provided by frontend
-    if (transcriptXML && transcriptXML.length > 50) {
-      const transcript = parseXMLCaptions(transcriptXML);
-      return res.json({ transcript, source: "frontend-xml" });
+    // LAYER 1: Immediate XML Parsing (If frontend found it and no translation needed)
+    if (transcriptXML && (!targetLang || targetLang === "English")) {
+      const matches = [...transcriptXML.matchAll(/<text[^>]*>(.*?)<\/text>/g)];
+      const transcript = matches.map(m => ({ text: m[1].replace(/&amp;/g, "&").replace(/&#39;/g, "'") }));
+      return res.json({ transcript, source: "xml" });
     }
 
-    // LAYER 2: Fallback to Gemini via Queue
+    // LAYER 2: AI Fallback/Translation via Queue
     const aiResult = await limiter.schedule(async () => {
       try {
-        return await fetchFromGemini(videoId, "gemini-1.5-flash");
+        return await fetchFromGemini(videoId, "gemini-1.5-flash", targetLang);
       } catch (e) {
-        // LAYER 3: Fallback to Flash-Lite if Flash fails
-        console.log("Flash failed, trying Lite...");
-        return await fetchFromGemini(videoId, "gemini-1.5-flash-lite");
+        console.log("Switching to Flash-Lite...");
+        return await fetchFromGemini(videoId, "gemini-1.5-flash-lite", targetLang);
       }
     });
 
-    // Format AI string into your existing array structure
-    const formattedTranscript = [{ text: aiResult }];
-    res.json({ transcript: formattedTranscript, source: "gemini-ai" });
+    res.json({ transcript: [{ text: aiResult }], source: "gemini" });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "All extraction methods failed." });
+    res.status(500).json({ error: "System busy. Please try again in a moment." });
   }
 });
 
-app.listen(10000, () => console.log("System Online"));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Backend Active on Port ${PORT}`));
