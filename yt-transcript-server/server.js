@@ -1,57 +1,67 @@
 /**
  * BACKEND: Node.js + Express
- * PURPOSE: Handles AI logic and Key Rotation
+ * LOCATION: Your server folder
  */
 import express from "express";
 import cors from "cors";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import 'dotenv/config';
+import 'dotenv/config'; // Requires npm install dotenv
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-// Load Gemini API Key from your .env file
+// Middleware
+app.use(cors()); // Allows your Vercel frontend to access this API
+app.use(express.json()); // Allows the server to read JSON bodies
+
+// Initialize Gemini with the key from your Render Environment Variables
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY_1);
 
 app.post("/transcript", async (req, res) => {
   const { videoUrl, targetLang } = req.body;
-  const videoId = videoUrl.match(/(?:v=|\/)([0-9A-Za-z_-]{11})/)?.[1];
 
-  if (!videoId) return res.status(400).json({ error: "Invalid YouTube URL" });
+  // 1. Extract Video ID: Ensuring we have a valid 11-character YouTube ID
+  const videoId = videoUrl?.match(/(?:v=|\/)([0-9A-Za-z_-]{11})/)?.[1];
+
+  if (!videoId) {
+    return res.status(400).json({ error: "Invalid YouTube URL provided." });
+  }
 
   try {
+    // 2. Select the Model: Flash 1.5 is the fastest and has a high free-tier quota
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     
-    // Updated Prompt to enforce [MM:SS] structure for the search/jump logic
+    // 3. The Instruction: We ask for a specific structure so we can parse it later
     const prompt = `
-      Instructions for https://www.youtube.com/watch?v=${videoId}:
-      1. Extract the transcript with timestamps at the start of every new thought or paragraph.
-      2. Use the exact format [MM:SS] for timestamps.
-      3. Create a professional title and a 3-sentence summary.
-      4. Translate everything into ${targetLang}.
+      Instructions for video: https://www.youtube.com/watch?v=${videoId}
+      1. Extract the full transcript with [MM:SS] timestamps at the start of paragraphs.
+      2. Create a professional title and a 3-sentence summary.
+      3. Translate EVERYTHING (title, summary, transcript) into ${targetLang || 'English'}.
       
-      Output format:
-      TITLE: [insert title]
-      SUMMARY: [insert summary]
-      TRANSCRIPT:
-      [00:00] Initial introduction...
-      [01:15] Key point about the topic...
+      Output format EXACTLY:
+      TITLE: [title here]
+      SUMMARY: [summary here]
+      TRANSCRIPT: [text here]
     `;
 
     const result = await model.generateContent(prompt);
     const text = result.response.text();
     
-    // Parsing the structured AI response
+    // 4. Parsing Logic: Extracting data between the markers we set in the prompt
     const title = text.match(/TITLE:(.*?)(?=SUMMARY:)/s)?.[1]?.trim() || "Video Transcript";
-    const summary = text.match(/SUMMARY:(.*?)(?=TRANSCRIPT:)/s)?.[1]?.trim() || "";
+    const summary = text.match(/SUMMARY:(.*?)(?=TRANSCRIPT:)/s)?.[1]?.trim() || "No summary available.";
     const transcript = text.match(/TRANSCRIPT:(.*)/s)?.[1]?.trim() || text;
 
+    // 5. Success Response
     res.json({ title, summary, transcript, videoId });
+
   } catch (err) {
-    res.status(500).json({ error: "AI Processing Error" });
+    // 6. Error Handling: This shows up in your Render "Logs" tab
+    console.error("CRITICAL BACKEND ERROR:", err.message);
+    res.status(500).json({ 
+      error: "Gemini failed to process this video. It might be too long, private, or restricted." 
+    });
   }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Backend live on ${PORT}`));
+app.listen(PORT, () => console.log(`Backend is active on port ${PORT}`));
