@@ -1,6 +1,6 @@
 /**
  * BACKEND: Node.js + Express
- * SDK: @google/genai (2026 Modern)
+ * SDK: @google/genai (2026 Standard)
  */
 import express from "express";
 import cors from "cors";
@@ -11,65 +11,68 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize with your key
+// Initialize the 2026 client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_KEY_1 });
 
 app.post("/transcript", async (req, res) => {
   const { videoUrl, targetLang } = req.body;
-  const videoId = videoUrl?.match(/(?:v=|\/)([0-9A-Za-z_-]{11})/)?.[1];
 
-  if (!videoId) {
-    return res.status(400).json({ error: "Invalid YouTube URL" });
+  if (!videoUrl) {
+    return res.status(400).json({ error: "No URL provided." });
   }
 
   try {
     /**
-     * FIX: Use 'gemini-flash-latest' or 'gemini-3-flash-preview'.
-     * 'gemini-3-flash' (without -preview) is not a valid API ID yet.
+     * FIX 1: Use 'gemini-2.5-flash' or 'gemini-3-flash-preview'.
+     * 'gemini-3-flash' (plain) often throws 404 if not using the preview ID.
      */
     const response = await ai.models.generateContent({
-      model: "gemini-flash-latest", 
-      contents: [{
-        role: "user",
-        parts: [{
+      model: "gemini-2.5-flash", 
+      contents: [
+        {
+          // FIX 2: Explicitly pass the YouTube URL as a FileData object.
+          // This tells Gemini to actually fetch and analyze the video content.
+          fileData: {
+            fileUri: videoUrl,
+            mimeType: "video/mp4" 
+          }
+        },
+        {
           text: `
-            Analyze this YouTube video: https://www.youtube.com/watch?v=${videoId}
-            
-            1. Extract a full timestamped transcript [MM:SS].
-            2. Provide a Title and a 3-sentence Summary.
+            Analyze this specific video. 
+            1. Extract the full transcript with [MM:SS] timestamps.
+            2. Create a Title and a 3-sentence Summary.
             3. Translate everything into ${targetLang || 'English'}.
+            
+            IMPORTANT: Do not summarize Llama 3.1 or AI news unless it is actually in this video.
             
             FORMAT:
             TITLE: [Title]
             SUMMARY: [Summary]
             TRANSCRIPT: [Text]
           `
-        }]
-      }]
+        }
+      ]
     });
 
-    // The new @google/genai SDK returns text as a property
     const text = response.text || "";
 
+    // Parsing the structured response
     const title = text.match(/TITLE:(.*?)(?=SUMMARY:)/s)?.[1]?.trim() || "Video Analysis";
-    const summary = text.match(/SUMMARY:(.*?)(?=TRANSCRIPT:)/s)?.[1]?.trim() || "Summary not available.";
+    const summary = text.match(/SUMMARY:(.*?)(?=TRANSCRIPT:)/s)?.[1]?.trim() || "No summary available.";
     const transcript = text.match(/TRANSCRIPT:(.*)/s)?.[1]?.trim() || text;
 
-    res.json({ title, summary, transcript, videoId });
+    res.json({ title, summary, transcript });
 
   } catch (err) {
     console.error("BACKEND ERROR:", err);
-    // Return a clean error to the frontend
     res.status(500).json({ 
-      error: `Gemini API Error: ${err.message}. If 404 persists, try changing the model to 'gemini-2.5-flash'.` 
+      error: `Gemini API Error: ${err.message}. Check your API quota in Google AI Studio.` 
     });
   }
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`-----------------------------------------------`);
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`✅ Using gemini-flash-latest alias`);
-  console.log(`-----------------------------------------------`);
+  console.log(`🚀 Server running on port ${PORT} with YouTube Multimodal support.`);
 });
