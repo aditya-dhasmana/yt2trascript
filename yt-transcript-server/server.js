@@ -1,17 +1,17 @@
 /**
  * BACKEND: Node.js + Express
- * SDK: @google/genai (2026 Standard)
+ * SDK: @google/genai (2026 Modern)
  */
 import express from "express";
 import cors from "cors";
-import { GoogleGenAI } from "@google/genai"; // The new SDK
+import { GoogleGenAI } from "@google/genai";
 import 'dotenv/config';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize the new client
+// Initialize with your key
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_KEY_1 });
 
 app.post("/transcript", async (req, res) => {
@@ -24,45 +24,52 @@ app.post("/transcript", async (req, res) => {
 
   try {
     /**
-     * FIX: Use 'gemini-3-flash'. 
-     * The new SDK handles the 'models/' prefix and versioning automatically.
+     * FIX: Use 'gemini-flash-latest' or 'gemini-3-flash-preview'.
+     * 'gemini-3-flash' (without -preview) is not a valid API ID yet.
      */
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash",
-      contents: `
-        Analyze this video: https://www.youtube.com/watch?v=${videoId}
-        
-        REQUIRED OUTPUT:
-        1. Full transcript with [MM:SS] timestamps.
-        2. A creative TITLE.
-        3. A 3-sentence SUMMARY.
-        4. All content must be in ${targetLang || 'English'}.
-        
-        FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
-        TITLE: [Title]
-        SUMMARY: [Summary]
-        TRANSCRIPT: [Transcript with timestamps]
-      `
+      model: "gemini-flash-latest", 
+      contents: [{
+        role: "user",
+        parts: [{
+          text: `
+            Analyze this YouTube video: https://www.youtube.com/watch?v=${videoId}
+            
+            1. Extract a full timestamped transcript [MM:SS].
+            2. Provide a Title and a 3-sentence Summary.
+            3. Translate everything into ${targetLang || 'English'}.
+            
+            FORMAT:
+            TITLE: [Title]
+            SUMMARY: [Summary]
+            TRANSCRIPT: [Text]
+          `
+        }]
+      }]
     });
 
-    // In the new SDK, response.text is a property, not a function
-    const text = response.text;
+    // The new @google/genai SDK returns text as a property
+    const text = response.text || "";
 
-    const title = text.match(/TITLE:(.*?)(?=SUMMARY:)/s)?.[1]?.trim() || "Transcript";
-    const summary = text.match(/SUMMARY:(.*?)(?=TRANSCRIPT:)/s)?.[1]?.trim() || "No summary available.";
+    const title = text.match(/TITLE:(.*?)(?=SUMMARY:)/s)?.[1]?.trim() || "Video Analysis";
+    const summary = text.match(/SUMMARY:(.*?)(?=TRANSCRIPT:)/s)?.[1]?.trim() || "Summary not available.";
     const transcript = text.match(/TRANSCRIPT:(.*)/s)?.[1]?.trim() || text;
 
     res.json({ title, summary, transcript, videoId });
 
   } catch (err) {
     console.error("BACKEND ERROR:", err);
+    // Return a clean error to the frontend
     res.status(500).json({ 
-      error: `Gemini 3 Error: ${err.message}. Please verify your API Key in Google AI Studio.` 
+      error: `Gemini API Error: ${err.message}. If 404 persists, try changing the model to 'gemini-2.5-flash'.` 
     });
   }
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🚀 Gemini 3 Flash Server running on port ${PORT}`);
+  console.log(`-----------------------------------------------`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`✅ Using gemini-flash-latest alias`);
+  console.log(`-----------------------------------------------`);
 });
