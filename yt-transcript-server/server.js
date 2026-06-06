@@ -1,83 +1,100 @@
-/**
- * BACKEND: Node.js + Express
- * SDK: @google/genai (2026 Standard)
- */
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { GoogleGenAI } from "@google/genai";
-import 'dotenv/config';
+import { TranscriptManager } from "./lib/services/transcriptManager.js";
+import { generateCleanTranscript, generateSummary } from "./lib/services/aiService.js";
+import { cache } from "./lib/cache/memoryCache.js";
+import { AppError } from "./lib/utils/errors.js";
+import { getProviderSlots } from "./lib/transcript/providers/providerRegistry.js";
 
 const app = express();
+const transcriptManager = new TranscriptManager();
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 
-// Initialize the 2026 client
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_KEY_1 });
-
-app.post("/transcript", async (req, res) => {
-  const { videoUrl, targetLang } = req.body;
-
-  if (!videoUrl) {
-    return res.status(400).json({ error: "No URL provided." });
-  }
-
-  try {
-    /**
-     * FIX 1: Use 'gemini-2.5-flash' or 'gemini-3-flash-preview'.
-     * 'gemini-3-flash' (plain) often throws 404 if not using the preview ID.
-     */
-const response = await ai.models.generateContent({
-  model: "gemini-3-flash-preview", 
-  generationConfig: {
-    temperature: 0.0,            // Zero randomness = Faster choice
-    media_resolution: "low",      // 70 tokens per frame vs 258
-    // CUSTOM 2026 SPEED HACK: Use video metadata to focus on audio
-    video_metadata: {
-      fps: 0.1                   // Only process 1 frame every 10s
-    }
-  },
-  contents: [
-    {
-      fileData: {
-        fileUri: videoUrl,
-        mimeType: "video/mp4"
-      }
-    },
-    { text:  ` Analyze this specific video. 
-            1. Extract the full transcript with [MM:SS] timestamps.
-            2. Create a Title and a 3-sentence Summary.
-            3. Translate everything into ${targetLang || 'English'}.
-            
-            IMPORTANT: Do not summarize Llama 3.1 or AI news unless it is actually in this video.
-            
-            FORMAT:
-            TITLE: [Title]
-            SUMMARY: [Summary]
-            TRANSCRIPT: [Text]
-          
-          "CRITICAL: Just output the transcript. No preamble. No analysis."` }
-  ]
+app.get("/health", async (req, res) => {
+  res.json({
+    ok: true,
+    providers: getProviderSlots(),
+    heavyTranscriptionEnabled: process.env.ENABLE_HEAVY_TRANSCRIPTION === "true",
+    cacheProvider: process.env.CACHE_PROVIDER || "memory",
+  });
 });
-          
 
-    const text = response.text || "";
-
-    // Parsing the structured response
-    const title = text.match(/TITLE:(.*?)(?=SUMMARY:)/s)?.[1]?.trim() || "Video Analysis";
-    const summary = text.match(/SUMMARY:(.*?)(?=TRANSCRIPT:)/s)?.[1]?.trim() || "No summary available.";
-    const transcript = text.match(/TRANSCRIPT:(.*)/s)?.[1]?.trim() || text;
-
-    res.json({ title, summary, transcript });
-
-  } catch (err) {
-    console.error("BACKEND ERROR:", err);
-    res.status(500).json({ 
-      error: `Gemini API Error: ${err.message}. Check your API quota in Google AI Studio.` 
-    });
+app.post("/metadata", async (req, res, next) => {
+  try {
+    const { videoUrl } = req.body;
+    const video = await transcriptManager.getVideo({ videoUrl });
+    res.json(video);
+  } catch (error) {
+    next(error);
   }
+});
+
+app.post("/transcript", async (req, res, next) => {
+  try {
+    const { videoUrl, lang } = req.body;
+    const result = await transcriptManager.getTranscript({ videoUrl, lang });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/ai/clean", async (req, res, next) => {
+  try {
+    const { videoId, transcript } = req.body;
+
+    if (!videoId || !transcript) {
+      throw new AppError("Video ID and transcript are required.", 400, "MISSING_AI_INPUT");
+    }
+
+    const result = await generateCleanTranscript({ videoId, transcript });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/ai/summary", async (req, res, next) => {
+  try {
+    const { videoId, transcript } = req.body;
+
+    if (!videoId || !transcript) {
+      throw new AppError("Video ID and transcript are required.", 400, "MISSING_AI_INPUT");
+    }
+
+    const result = await generateSummary({ videoId, transcript });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/cache/:videoId", (req, res) => {
+  res.json(cache.snapshot(req.params.videoId));
+});
+
+app.use((error, req, res, next) => {
+  const statusCode = error.statusCode || 500;
+  const code = error.code || "INTERNAL_ERROR";
+
+  console.error("BACKEND ERROR:", {
+    code,
+    message: error.message,
+    details: error.details,
+  });
+
+  res.status(statusCode).json({
+    error: error.message || "The server could not complete this request.",
+    code,
+    details: error.details || {},
+  });
 });
 
 const PORT = process.env.PORT || 10000;
+
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT} with YouTube Multimodal support.`);
+  console.log(`Server running on port ${PORT}. Transcript-first mode enabled.`);
 });

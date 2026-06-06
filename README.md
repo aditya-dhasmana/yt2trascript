@@ -1,41 +1,61 @@
-<<<<<<< HEAD
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# YouTube Transcript Platform
 
-## Getting Started
+A transcript-first YouTube tool focused on fast transcript extraction, optional AI generation, and low API usage.
 
-First, run the development server:
+## Architecture
+
+The app is split into two responsibilities:
+
+- Frontend: URL input, transcript display, tabs, copy, TXT/PDF download, and explicit AI action buttons.
+- Backend: metadata lookup, transcript provider routing, caching, and Gemini-powered clean transcript or summary generation.
+
+## Local Setup
+
+Create the frontend env file:
+
+```env
+NEXT_PUBLIC_BACKEND_URL=http://localhost:10000
+```
+
+Create the backend env file in `yt-transcript-server`:
+
+```env
+PORT=10000
+YOUTUBE_API_KEY=
+GEMINI_API_KEY=
+ENABLE_HEAVY_TRANSCRIPTION=false
+CACHE_PROVIDER=memory
+TRANSCRIPT_PROVIDER_PRIORITY=youtube-transcript
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+## Run Locally
+
+Start the backend:
+
+```bash
+cd yt-transcript-server
+npm start
+```
+
+Start the frontend:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## Backend Routes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `POST /metadata`: fetch video metadata.
+- `POST /transcript`: fetch the original transcript through the provider pipeline.
+- `POST /ai/clean`: generate a clean transcript only after the user asks.
+- `POST /ai/summary`: generate a summary only after the user asks.
+- `GET /health`: inspect provider and cache configuration.
 
-## Learn More
+## Engineering Rhythm
 
-To learn more about Next.js, take a look at the following resources:
+The main pattern is provider routing.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-=======
-# yt2trascript
-yt2transcript is a Tool used to extract caption/transcript from youTube videos
->>>>>>> b9587104e9db15d8fefc88c4c14d270a7f0d3017
+Providers own how one source works. The manager owns order, cache lookup, fallback, and normalized errors. This keeps business logic stable when new providers like Supadata, Apify, Whisper, or uploads are added later.
