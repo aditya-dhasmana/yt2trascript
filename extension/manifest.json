@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Raw Transcript Extractor",
+  "version": "1.1.0",
+  "description": "Extract YouTube captions locally, then optionally clean or summarize the transcript.",
+  "minimum_chrome_version": "120",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://*.youtube.com/*",
+    "https://*.googlevideo.com/*",
+    "https://youtu.be/*",
+    "https://yt2trascript.onrender.com/*",
+    "http://localhost:10000/*"
+  ],
+  "action": {
+    "default_title": "Extract YouTube Transcript",
+    "default_popup": "src/popup/popup.html"
+  },
+  "background": {
+    "service_worker": "dist/background/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*", "https://youtu.be/*"],
+      "js": ["dist/content/contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

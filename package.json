@@ -2,23 +2,27 @@
   "name": "youtube-transcript-downloader",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "set NEXT_DISABLE_TURBOPACK=1 && next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint src",
+    "test": "node --test test/*.test.js",
+    "check": "npm run lint && npm test && npm run build",
+    "check:backend": "npm --prefix yt-transcript-server run check",
+    "check:extension": "npm --prefix extension run check"
   },
   "dependencies": {
-    "jspdf": "^4.0.0",
-    "next": "16.1.1",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
-    "youtube-transcript": "^1.2.1"
+    "jspdf": "^4.2.1",
+    "next": "16.2.9",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "eslint": "^9",
-    "eslint-config-next": "16.1.1",
+    "eslint-config-next": "16.2.9",
     "tailwindcss": "^4"
   }
 }

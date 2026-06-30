@@ -1,4 +1,4 @@
-import { YoutubeTranscript } from "youtube-transcript";
+import { fetchTranscript } from "youtube-transcript";
 import { formatTimestamp } from "../../utils/youtube.js";
 
 export const youtubeTranscriptProvider = {
@@ -13,7 +13,7 @@ export const youtubeTranscriptProvider = {
   },
 
   async getTranscript({ videoId, lang }) {
-    const segments = await YoutubeTranscript.fetchTranscript(videoId, lang ? { lang } : undefined);
+    const segments = await fetchTranscript(videoId, lang ? { lang } : undefined);
 
     if (!segments?.length) {
       throw new Error("Transcript unavailable");

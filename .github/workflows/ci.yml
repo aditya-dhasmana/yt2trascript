@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project:
+          - path: .
+            command: npm run check
+          - path: yt-transcript-server
+            command: npm run check
+          - path: extension
+            command: npm run check
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.project.path }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.project.path }}/package-lock.json
+      - run: npm ci
+      - run: ${{ matrix.project.command }}

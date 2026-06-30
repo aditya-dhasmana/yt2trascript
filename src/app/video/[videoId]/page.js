@@ -1,7 +1,7 @@
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:10000";
 
 async function fetchVideoTranscript(videoId) {
-  const response = await fetch(`${BACKEND_URL}/transcript`, {
+  const response = await fetch(`${BACKEND_URL}/api/transcript`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

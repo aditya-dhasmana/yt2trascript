@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Raw Transcript Extractor</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div>
+          <p class="eyebrow">YouTube Transcript</p>
+          <h1>Raw Extractor</h1>
+        </div>
+        <button id="refreshButton" class="icon-button" type="button" title="Refresh transcript">Refresh</button>
+      </header>
+
+      <section class="video-info" aria-live="polite">
+        <p id="videoTitle" class="video-title">Open a YouTube video to begin.</p>
+        <p id="videoMeta" class="video-meta">No video detected</p>
+      </section>
+
+      <section class="source-info" aria-label="Extraction source">
+        <p><strong>Extraction source:</strong> Extension Mode</p>
+        <p><strong>YouTube fetch:</strong> User browser/extension</p>
+        <p><strong>Backend YouTube fetch:</strong> No</p>
+      </section>
+
+      <section class="toolbar" aria-label="Transcript actions">
+        <button id="copyButton" type="button">Copy</button>
+        <button id="downloadTxtButton" type="button">TXT</button>
+        <button id="downloadSrtButton" type="button">SRT</button>
+        <label class="toggle">
+          <input id="timestampToggle" type="checkbox" checked />
+          <span>Timestamps</span>
+        </label>
+      </section>
+
+      <section class="ai-panel" aria-label="Optional AI actions">
+        <p>Optional AI actions</p>
+        <div class="ai-toolbar">
+          <button id="rawButton" type="button">Raw</button>
+          <button id="cleanButton" type="button">Clean</button>
+          <button id="summaryButton" type="button">Summary</button>
+          <button id="notesButton" type="button">Notes</button>
+        </div>
+      </section>
+
+      <section class="status" id="statusMessage" role="status">Loading transcript...</section>
+      <pre id="transcriptViewer" class="transcript-viewer" aria-label="Transcript output"></pre>
+    </main>
+
+    <script src="../../dist/popup/popup.js"></script>
+  </body>
+</html>

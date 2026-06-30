@@ -2,8 +2,12 @@
 
 import { useMemo, useState } from "react";
 import jsPDF from "jspdf";
+import BrowserModeSetup from "./components/BrowserModeSetup";
+import ExtractionSourceInfo from "./components/ExtractionSourceInfo";
+import { getFriendlyAiFailureMessage } from "../lib/aiUi";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:10000";
+const EXTENSION_DOWNLOAD_URL = "/yt-transcript-extension.zip";
 
 const tabs = [
   { id: "original", label: "Original Transcript" },
@@ -109,7 +113,9 @@ export default function Home() {
 
     const result = await response.json();
     if (!response.ok) {
-      throw new Error(result.error || "Request failed.");
+      const requestError = new Error(result.message || result.error || "Request failed.");
+      requestError.code = result.code;
+      throw requestError;
     }
 
     return result;
@@ -128,7 +134,7 @@ export default function Home() {
     let fallbackHintTimer;
 
     try {
-      const metadataResult = await request("/metadata", { videoUrl });
+      const metadataResult = await request("/api/metadata", { videoUrl });
       setVideo({
         videoId: metadataResult.videoId,
         metadata: metadataResult.metadata,
@@ -141,7 +147,7 @@ export default function Home() {
         setProcessingStep("fallback");
       }, 8000);
 
-      const result = await request("/transcript", { videoUrl });
+      const result = await request("/api/transcript", { videoUrl });
 
       setVideo({ videoId: result.videoId, metadata: result.metadata, provider: result.provider, cacheHit: result.cacheHit });
       setOriginalTranscript(result.transcript.text);
@@ -162,7 +168,7 @@ export default function Home() {
     setError("");
 
     try {
-      const result = await request("/ai/clean", {
+      const result = await request("/api/ai/clean", {
         videoId: video.videoId,
         transcript: originalTranscript,
       });
@@ -170,7 +176,7 @@ export default function Home() {
       setActiveTab("clean");
       setAiStatus("idle");
     } catch (err) {
-      setError(err.message);
+      setError(getFriendlyAiFailureMessage("clean", err.code));
       setAiStatus("idle");
     }
   }
@@ -181,7 +187,7 @@ export default function Home() {
     setError("");
 
     try {
-      const result = await request("/ai/summary", {
+      const result = await request("/api/ai/summary", {
         videoId: video.videoId,
         transcript: originalTranscript,
       });
@@ -189,7 +195,7 @@ export default function Home() {
       setActiveTab("summary");
       setAiStatus("idle");
     } catch (err) {
-      setError(err.message);
+      setError(getFriendlyAiFailureMessage("summary", err.code));
       setAiStatus("idle");
     }
   }
@@ -226,7 +232,15 @@ export default function Home() {
             Extract transcripts, clean captions and generate summaries from YouTube videos.
           </p>
 
-          <div className="mt-8 flex w-full max-w-3xl flex-col gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2 md:flex-row">
+          <BrowserModeSetup />
+
+          <p className="mt-8 text-sm font-bold uppercase tracking-wide text-zinc-700">
+            Server Mode · Fallback
+          </p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600">
+            Paste a URL here only when Browser Mode is unavailable. Our server must contact YouTube, so this fallback may fail if the hosting provider is blocked.
+          </p>
+          <div className="mt-3 flex w-full max-w-3xl flex-col gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2 md:flex-row">
             <input
               className="min-h-12 flex-1 rounded-md border border-transparent bg-white px-4 text-sm outline-none focus:border-emerald-500"
               placeholder="Paste a YouTube URL"
@@ -302,6 +316,9 @@ export default function Home() {
                   <p className="font-semibold text-zinc-950">Cache</p>
                   <p>{video.cacheHit ? "Hit" : "Fresh"}</p>
                 </div>
+              </div>
+              <div className="mt-4">
+                <ExtractionSourceInfo mode="server" compact />
               </div>
             </aside>
           ) : (
@@ -383,6 +400,35 @@ export default function Home() {
           </section>
         </section>
       )}
+
+      <section id="extension" className="border-y border-zinc-200 bg-zinc-950 text-white">
+        <div className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8 md:grid-cols-[1fr_auto] md:items-center md:px-8">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
+              Optional Extension Mode
+            </p>
+            <h2 className="mt-2 max-w-2xl text-2xl font-black md:text-3xl">
+              Keep one-click transcripts inside YouTube
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
+              Browser Mode above is the primary V1 experience. Install the extension only if you want a persistent popup workflow on YouTube.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row md:justify-end">
+            <a
+              className="inline-flex min-h-12 items-center justify-center rounded-md bg-white px-5 text-sm font-bold text-zinc-950 hover:bg-zinc-100"
+              href={EXTENSION_DOWNLOAD_URL}
+              download
+            >
+              Download Optional Extension
+            </a>
+            <span className="inline-flex min-h-12 items-center justify-center rounded-md border border-zinc-700 px-5 text-sm font-bold text-zinc-400">
+              Store Listing Soon
+            </span>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

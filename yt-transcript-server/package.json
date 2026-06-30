@@ -4,16 +4,20 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test",
+    "test:smoke": "node scripts/smoke-live.js",
+    "check": "npm test && node --check server.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
-    "@google/genai": "^1.41.0",
-    "axios": "^1.13.5",
-    "bottleneck": "^2.19.5",
+    "@google/genai": "^1.52.0",
+    "axios": "^1.18.1",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.4",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "p-queue": "^9.1.0",
-    "youtube-transcript": "^1.2.1"
+    "youtube-transcript": "^1.3.1"
   }
 }

@@ -1,14 +1,12 @@
 import { youtubeTranscriptProvider } from "./youtubeTranscriptProvider.js";
+import { loadConfig } from "../../config/environment.js";
 
 const providerSlots = {
   "youtube-transcript": youtubeTranscriptProvider,
 };
 
-export function getTranscriptProviders() {
-  const priority = (process.env.TRANSCRIPT_PROVIDER_PRIORITY || "youtube-transcript")
-    .split(",")
-    .map((provider) => provider.trim())
-    .filter(Boolean);
+export function getTranscriptProviders(config = loadConfig()) {
+  const priority = config.transcriptProviderPriority;
 
   return priority
     .map((providerName) => providerSlots[providerName])

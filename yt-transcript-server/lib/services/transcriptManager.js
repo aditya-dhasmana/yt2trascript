@@ -1,14 +1,29 @@
 import { cache } from "../cache/memoryCache.js";
-import { AppError, normalizeProviderError } from "../utils/errors.js";
+import {
+  AppError,
+  createTranscriptError,
+  normalizeProviderError,
+  toPublicProviderFailure,
+} from "../utils/errors.js";
 import { extractVideoId } from "../utils/youtube.js";
 import { youtubeMetadataProvider } from "../transcript/providers/youtubeMetadataProvider.js";
 import { getTranscriptProviders } from "../transcript/providers/providerRegistry.js";
 import { generateTranscriptFromVideo } from "./aiService.js";
+import { loadConfig } from "../config/environment.js";
 
 export class TranscriptManager {
-  constructor({ transcriptProviders = getTranscriptProviders(), metadataProvider = youtubeMetadataProvider } = {}) {
-    this.transcriptProviders = transcriptProviders;
+  constructor({
+    transcriptProviders,
+    metadataProvider = youtubeMetadataProvider,
+    config = loadConfig(),
+    logger = console,
+    geminiFallback = generateTranscriptFromVideo,
+  } = {}) {
+    this.config = config;
+    this.transcriptProviders = transcriptProviders || getTranscriptProviders(config);
     this.metadataProvider = metadataProvider;
+    this.logger = logger;
+    this.geminiFallback = geminiFallback;
   }
 
   async getVideo({ videoUrl }) {
@@ -55,16 +70,28 @@ export class TranscriptManager {
           transcript,
           provider: provider.name,
           cacheHit: false,
-          providerFailures,
+          providerFailures: providerFailures.map(toPublicProviderFailure),
         };
       } catch (error) {
-        providerFailures.push(normalizeProviderError(error, provider.name));
+        const failure = normalizeProviderError(error, provider.name);
+        providerFailures.push(failure);
+        this.logger.warn?.("TRANSCRIPT PROVIDER FAILURE", {
+          videoId,
+          provider: failure.provider,
+          code: failure.code,
+          errorName: failure.errorName,
+          technicalMessage: failure.technicalMessage,
+        });
       }
     }
 
-    if (process.env.ENABLE_HEAVY_TRANSCRIPTION === "true") {
+    if (this.config.geminiVideoFallbackEnabled && this.config.geminiApiKey) {
       try {
-        const result = await generateTranscriptFromVideo({ videoId, videoUrl });
+        const result = await this.geminiFallback({
+          videoId,
+          videoUrl,
+          config: this.config,
+        });
         cache.set(videoId, cacheKey, result.transcript);
 
         return {
@@ -73,32 +100,35 @@ export class TranscriptManager {
           transcript: result.transcript,
           provider: "gemini-video-fallback",
           cacheHit: result.cacheHit,
-          providerFailures,
+          providerFailures: providerFailures.map(toPublicProviderFailure),
         };
       } catch (error) {
-        providerFailures.push(normalizeProviderError(error, "gemini-video-fallback"));
+        const failure = normalizeProviderError(error, "gemini-video-fallback");
+        providerFailures.push(failure);
+        this.logger.warn?.("OPTIONAL GEMINI FALLBACK FAILURE", {
+          videoId,
+          code: failure.code,
+          errorName: failure.errorName,
+          technicalMessage: failure.technicalMessage,
+        });
       }
-    } else {
-      providerFailures.push({
-        provider: "heavy-transcription",
-        code: "DISABLED",
-        message: "Heavy transcription fallback is disabled. Set ENABLE_HEAVY_TRANSCRIPTION=true to allow Gemini video fallback.",
-      });
     }
 
-    throw new AppError(
-      "Transcript unavailable. Try another video or upload a transcript file later.",
-      404,
-      "TRANSCRIPT_UNAVAILABLE",
-      { providerFailures },
-    );
+    throw createTranscriptError(providerFailures);
   }
 
   async fetchAndCacheMetadata(videoId) {
     try {
       const metadata = await this.metadataProvider.getMetadata({ videoId });
       return cache.set(videoId, "metadata", metadata);
-    } catch {
+    } catch (error) {
+      this.logger.warn?.("METADATA PROVIDER FAILURE", {
+        videoId,
+        provider: this.metadataProvider.name || "metadata-provider",
+        errorName: error?.name || "Error",
+        technicalMessage: error?.message || "Metadata provider failed without an error message.",
+      });
+
       return cache.set(videoId, "metadata", {
         title: "YouTube video",
         channel: "",
