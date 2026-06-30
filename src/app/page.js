@@ -154,7 +154,13 @@ export default function Home() {
       setProcessingStep("");
       setStatus("success");
     } catch (err) {
-      setError(err.message);
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("SERVER_MODE_FALLBACK_FAILED", {
+          code: err.code || "UNKNOWN_ERROR",
+          message: err.message,
+        });
+      }
+      setError("Server fallback failed. Try Browser Mode — it uses your browser instead of our server.");
       setProcessingStep("");
       setStatus("error");
     } finally {
@@ -234,40 +240,50 @@ export default function Home() {
 
           <BrowserModeSetup />
 
-          <p className="mt-8 text-sm font-bold uppercase tracking-wide text-zinc-700">
-            Server Mode · Fallback
-          </p>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600">
-            Paste a URL here only when Browser Mode is unavailable. Our server must contact YouTube, so this fallback may fail if the hosting provider is blocked.
-          </p>
-          <div className="mt-3 flex w-full max-w-3xl flex-col gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2 md:flex-row">
-            <input
-              className="min-h-12 flex-1 rounded-md border border-transparent bg-white px-4 text-sm outline-none focus:border-emerald-500"
-              placeholder="Paste a YouTube URL"
-              value={videoUrl}
-              onChange={(event) => setVideoUrl(event.target.value)}
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="min-h-12 rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-800 hover:bg-zinc-100"
-                onClick={async () => {
-                  const text = await navigator.clipboard.readText();
-                  setVideoUrl(text);
-                }}
-              >
-                Paste
-              </button>
-              <button
-                type="button"
-                className="min-h-12 rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
-                onClick={handleProcess}
-                disabled={!videoUrl || isProcessing}
-              >
-                {isProcessing ? "Processing..." : "Process"}
-              </button>
+          <details className="mt-8 w-full max-w-3xl rounded-lg border border-zinc-200 bg-zinc-50">
+            <summary className="cursor-pointer px-4 py-4 text-sm font-bold text-zinc-700 hover:text-zinc-950">
+              Advanced fallback · Server Mode
+            </summary>
+            <div className="border-t border-zinc-200 px-4 py-4">
+              <p className="inline-flex rounded-full bg-zinc-200 px-3 py-1 text-xs font-bold text-zinc-800">
+                Server Mode = Render backend fetches YouTube
+              </p>
+              <p className="mt-3 text-sm font-semibold leading-6 text-amber-800">
+                This uses our server to contact YouTube and may fail if the server is blocked.
+              </p>
+              <p className="mt-1 text-sm leading-6 text-zinc-600">
+                Use this only when Browser Mode is unavailable.
+              </p>
+              <div className="mt-4 flex flex-col gap-3 md:flex-row">
+                <input
+                  className="min-h-12 flex-1 rounded-md border border-zinc-300 bg-white px-4 text-sm outline-none focus:border-zinc-500"
+                  placeholder="Paste a YouTube URL"
+                  value={videoUrl}
+                  onChange={(event) => setVideoUrl(event.target.value)}
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="min-h-12 rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-800 hover:bg-zinc-100"
+                    onClick={async () => {
+                      const text = await navigator.clipboard.readText();
+                      setVideoUrl(text);
+                    }}
+                  >
+                    Paste
+                  </button>
+                  <button
+                    type="button"
+                    className="min-h-12 rounded-md bg-zinc-700 px-5 text-sm font-semibold text-white hover:bg-zinc-600 disabled:cursor-not-allowed disabled:bg-zinc-400"
+                    onClick={handleProcess}
+                    disabled={!videoUrl || isProcessing}
+                  >
+                    {isProcessing ? "Trying Server Fallback..." : "Try Server Fallback"}
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          </details>
 
           {isProcessing && (
             <div className="mt-5 max-w-3xl rounded-lg border border-emerald-200 bg-emerald-50 p-4">

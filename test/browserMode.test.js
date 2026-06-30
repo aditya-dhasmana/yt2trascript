@@ -172,6 +172,27 @@ test("Browser Mode source does not import backend providers or youtube-transcrip
   assert.doesNotMatch(source, /yt-transcript-server\/lib/);
 });
 
+test("homepage presents Browser Mode first and Server Mode as an advanced fallback", async () => {
+  const projectRoot = path.resolve(import.meta.dirname, "..");
+  const browserSetup = await readFile(
+    path.join(projectRoot, "src/app/components/BrowserModeSetup.js"),
+    "utf8",
+  );
+  const homePage = await readFile(path.join(projectRoot, "src/app/page.js"), "utf8");
+
+  assert.match(browserSetup, /Browser Mode = User browser fetches YouTube/);
+  assert.match(browserSetup, /Drag .Get Transcript. to your bookmarks bar/);
+  assert.match(browserSetup, /Open YouTube video/);
+  assert.match(browserSetup, /Click the bookmarklet/);
+  assert.match(browserSetup, /Transcript opens here/);
+  assert.match(homePage, /<details[^>]*>/);
+  assert.match(homePage, /Advanced fallback · Server Mode/);
+  assert.match(homePage, /Server Mode = Render backend fetches YouTube/);
+  assert.match(homePage, /Try Server Fallback/);
+  assert.match(homePage, /This uses our server to contact YouTube and may fail if the server is blocked/);
+  assert.match(homePage, /Server fallback failed\. Try Browser Mode — it uses your browser instead of our server\./);
+});
+
 test("Browser Mode development log exposes ownership counts but not transcript content", async () => {
   const projectRoot = path.resolve(import.meta.dirname, "..");
   const receiverSource = await readFile(

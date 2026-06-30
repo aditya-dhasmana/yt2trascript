@@ -27,6 +27,10 @@ export default function BrowserModeSetup() {
         It works on videos with available captions.
       </p>
 
+      <p className="mt-4 inline-flex rounded-full bg-emerald-800 px-3 py-1 text-xs font-bold text-white">
+        Browser Mode = User browser fetches YouTube
+      </p>
+
       <div className="mt-5 grid gap-5 md:grid-cols-[auto_1fr] md:items-center">
         <a
           ref={bookmarkletRef}
@@ -39,9 +43,9 @@ export default function BrowserModeSetup() {
 
         <ol id="browser-mode-steps" className="grid gap-2 text-sm text-emerald-950 sm:grid-cols-2">
           <li><span className="font-bold">1.</span> Drag “Get Transcript” to your bookmarks bar.</li>
-          <li><span className="font-bold">2.</span> Open a YouTube video with captions.</li>
-          <li><span className="font-bold">3.</span> Click the saved bookmark.</li>
-          <li><span className="font-bold">4.</span> The transcript opens on this website.</li>
+          <li><span className="font-bold">2.</span> Open YouTube video.</li>
+          <li><span className="font-bold">3.</span> Click the bookmarklet.</li>
+          <li><span className="font-bold">4.</span> Transcript opens here.</li>
         </ol>
       </div>
 
